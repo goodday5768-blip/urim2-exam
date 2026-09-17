@@ -117,7 +117,7 @@ select{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius
   <div class="notice" id="notice" hidden></div>
   <div class="card">
     <div class="row"><input type="text" id="name" placeholder="이름 (필수)" aria-label="이름"><select id="nameSel" hidden aria-label="이름 선택"></select></div>
-    <p class="muted" style="margin:10px 0 0">풀 지문을 아래에서 여러 개 골라 시작하세요. 한 번에 <b>지문마다 1문제</b>, <b>최대 <span id="nCap"></span>문제</b>가 나옵니다(한 회에 같은 지문이 두 번 나오지 않습니다 — 다른 문제의 지문에서 정답이 보이는 것을 막기 위해서입니다). 틀려서 다시 풀 때는 전에 나온 문제를 빼고 냅니다. 모두 맞히면 <b>합격</b>, 하나라도 틀리면 새 문제가 나옵니다.</p>
+    <p class="muted" style="margin:10px 0 0">풀 지문을 아래에서 여러 개 골라 시작하세요. 한 번에 <b>지문마다 1문제</b>, <b>최대 <span id="nCap"></span>문제</b>가 나옵니다(한 회에 같은 지문이 두 번 나오지 않습니다 — 다른 문제의 지문에서 정답이 보이는 것을 막기 위해서입니다). 지문을 20개 넘게 고르면 <b>영역(묶음)마다 고르게</b> 나옵니다. 틀려서 다시 풀 때는 전에 나온 문제를 빼고 냅니다. 모두 맞히면 <b>합격</b>, 하나라도 틀리면 새 문제가 나옵니다.</p>
   </div>
   <div class="card" id="board"></div>
   <div class="card" id="logCard" hidden>
@@ -324,20 +324,19 @@ function pickItems(pi, need, seen) {
   out.forEach(k => { u[k] = (u[k] || 0) + 1; seen.add(pi + ':' + k); });
   return out;
 }
-// 지문별 문제 수. 한 회 최대 D.cap — 넘으면 이번 도전에서 아직 안 나온 지문부터 1문제씩 돌아가며 채운다
+// 지문별 문제 수(0 또는 1). 누출 금지(09-17): 한 회에 한 지문은 한 문항만.
+// 고른 지문이 D.cap을 넘으면 영역(번호판 묶음)별로 돌아가며 1지문씩 뽑아 **영역 간 균등**(09-17 사용자 확정) — 영역 안에서는 이번 도전에서 덜 나온 지문 먼저.
 function roundPlan(indices, seen) {
-  const list = [...indices].sort((a, b) => a - b), need = 1;   // 누출 금지(09-17): 한 회에 한 지문은 한 문항만 — 같은 지문의 다른 문항이 원문을 보여 주면 정답이 드러난다
-  const plan = new Map(list.map(pi => [pi, Math.min(need, D.P[pi].items.length)]));
-  let total = [...plan.values()].reduce((s, n) => s + n, 0);
-  if (total <= D.cap) return plan;
-  plan.forEach((_, pi) => plan.set(pi, 0)); total = 0;
+  const list = [...indices].sort((a, b) => a - b), plan = new Map(list.map(pi => [pi, 1]));
+  if (list.length <= D.cap) return plan;
+  plan.forEach((_, pi) => plan.set(pi, 0));
   const seenCount = pi => D.P[pi].items.filter((_, k) => seen.has(pi + ':' + k)).length;
-  const order = shuffle(list).sort((a, b) => seenCount(a) - seenCount(b));
-  while (total < D.cap) {
-    let added = false;
-    for (const pi of order) { if (total >= D.cap) break; if (plan.get(pi) < D.P[pi].items.length) { plan.set(pi, plan.get(pi) + 1); total++; added = true; } }
-    if (!added) break;
-  }
+  const byG = new Map();
+  for (const pi of shuffle(list)) { const g = D.P[pi].g; if (!byG.has(g)) byG.set(g, []); byG.get(g).push(pi); }
+  const queues = shuffle([...byG.values()].map(q => q.sort((a, b) => seenCount(a) - seenCount(b))));   // 시작 영역도 회차마다 바뀐다
+  let total = 0;
+  while (total < D.cap && queues.some(q => q.length))
+    for (const q of queues) { if (total >= D.cap) break; if (q.length) { plan.set(q.shift(), 1); total++; } }
   return plan;
 }
 function mcPart(s) {       // 보기 섞기 + 해설 번호 치환
@@ -380,7 +379,15 @@ function makeRound(indices) {
   return qs;
 }
 // 회차 검사: 지문(pi) 중복 0 이어야 한다
-const chkRound = qs => new Set(qs.map(q => q.pi)).size === qs.length;
+const chkRound = qs => new Set(qs.map(q => q.pi)).size === qs.length && chkBalance(qs);
+// 균등 검사: 고른 지문이 cap을 넘었을 때 영역별 문제 수 차이가 1 이하(지문이 모자란 영역은 제외)
+function chkBalance(qs) {
+  const sel = [...(cur && cur.sel ? cur.sel : [])]; if (!sel.length || sel.length <= D.cap) return true;
+  const have = new Map(), got = new Map();
+  sel.forEach(pi => have.set(D.P[pi].g, (have.get(D.P[pi].g) || 0) + 1)); qs.forEach(q => got.set(D.P[q.pi].g, (got.get(D.P[q.pi].g) || 0) + 1));
+  const full = [...have].filter(([g, n]) => (got.get(g) || 0) < n).map(([g]) => got.get(g) || 0);   // 지문이 남는 영역들
+  return full.length < 2 || Math.max(...full) - Math.min(...full) <= 1;
+}
 const roundSize = indices => [...roundPlan(indices, new Set())].reduce((s, [, n]) => s + n, 0);
 
 // ---- 선생님께 전송 (D.reportUrl이 있을 때만) ----
