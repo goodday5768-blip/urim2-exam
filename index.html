@@ -117,7 +117,7 @@ select{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius
   <div class="notice" id="notice" hidden></div>
   <div class="card">
     <div class="row"><input type="text" id="name" placeholder="이름 (필수)" aria-label="이름"><select id="nameSel" hidden aria-label="이름 선택"></select></div>
-    <p class="muted" style="margin:10px 0 0">풀 지문을 아래에서 여러 개 골라 시작하세요. 지문 하나면 <b id="nSingle"></b>문제, 여러 개면 <b>지문마다 <span id="nMulti"></span>문제</b>, 한 번에 <b>최대 <span id="nCap"></span>문제</b>가 나옵니다. 틀려서 다시 풀 때는 전에 나온 문제를 빼고 냅니다. 모두 맞히면 <b>합격</b>, 하나라도 틀리면 새 문제가 나옵니다.</p>
+    <p class="muted" style="margin:10px 0 0">풀 지문을 아래에서 여러 개 골라 시작하세요. 한 번에 <b>지문마다 1문제</b>, <b>최대 <span id="nCap"></span>문제</b>가 나옵니다(한 회에 같은 지문이 두 번 나오지 않습니다 — 다른 문제의 지문에서 정답이 보이는 것을 막기 위해서입니다). 틀려서 다시 풀 때는 전에 나온 문제를 빼고 냅니다. 모두 맞히면 <b>합격</b>, 하나라도 틀리면 새 문제가 나옵니다.</p>
   </div>
   <div class="card" id="board"></div>
   <div class="card" id="logCard" hidden>
@@ -326,7 +326,7 @@ function pickItems(pi, need, seen) {
 }
 // 지문별 문제 수. 한 회 최대 D.cap — 넘으면 이번 도전에서 아직 안 나온 지문부터 1문제씩 돌아가며 채운다
 function roundPlan(indices, seen) {
-  const list = [...indices].sort((a, b) => a - b), need = list.length === 1 ? D.single : D.multi;
+  const list = [...indices].sort((a, b) => a - b), need = 1;   // 누출 금지(09-17): 한 회에 한 지문은 한 문항만 — 같은 지문의 다른 문항이 원문을 보여 주면 정답이 드러난다
   const plan = new Map(list.map(pi => [pi, Math.min(need, D.P[pi].items.length)]));
   let total = [...plan.values()].reduce((s, n) => s + n, 0);
   if (total <= D.cap) return plan;
@@ -376,8 +376,11 @@ function makeRound(indices) {
   const qs = [];
   for (const [pi, n] of roundPlan(indices, cur.seen)) if (n) for (const k of pickItems(pi, n, cur.seen)) qs.push(buildQuestion(pi, k));
   store.set('use', use);
+  if (!chkRound(qs)) console.error('누출 규칙 위반: 한 회에 같은 지문이 두 번');
   return qs;
 }
+// 회차 검사: 지문(pi) 중복 0 이어야 한다
+const chkRound = qs => new Set(qs.map(q => q.pi)).size === qs.length;
 const roundSize = indices => [...roundPlan(indices, new Set())].reduce((s, [, n]) => s + n, 0);
 
 // ---- 선생님께 전송 (D.reportUrl이 있을 때만) ----
@@ -532,7 +535,7 @@ function renderTeacher() {
 $('#appTitle').insertAdjacentText('afterbegin', D.title);
 $('#appSub').textContent = D.sub;
 document.title = D.title;
-$('#nSingle').textContent = D.single; $('#nMulti').textContent = D.multi; $('#nCap').textContent = D.cap;
+$('#nCap').textContent = D.cap;
 $('#go').onclick = start;
 $('#clearSel').onclick = () => { sel = new Set(); paintSel(); };
 $('#submit').onclick = grade;
